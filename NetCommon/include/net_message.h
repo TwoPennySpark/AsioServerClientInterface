@@ -1,3 +1,6 @@
+#ifndef NET_MESSAGE_H
+#define NET_MESSAGE_H
+
 #include "net_common.h"
 
 namespace tps
@@ -78,3 +81,5 @@ namespace tps
         };
     }
 }
+
+#endif // NET_MESSAGE_H
