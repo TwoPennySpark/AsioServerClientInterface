@@ -70,8 +70,8 @@ namespace tps
         template <typename T>
         struct owned_message
         {
-            message<T> msg;
             std::shared_ptr<connection<T>> owner = nullptr;
+            message<T> msg;
 
             friend std::ostream& operator<<(std::ostream& os, const owned_message& msg)
             {
