@@ -43,18 +43,53 @@ namespace tps
                     }
                 }
             }
-            bool ConnectToServer();
-            bool Disconnect();
-            bool isConnected() const
+
+            // ASYNC
+            void ConnectToServer(const asio::ip::tcp::resolver::results_type& endpoints)
+            {
+                if (m_nOwnerType == owner::client)
+                {
+                    asio::async_connect(m_socket, endpoints, [this](std::error_code ec, asio::ip::tcp::endpoint endpoint)
+                    {
+                        if (!ec)
+                        {
+                            ReadHeader();
+                        }
+                        else
+                        {
+                            std::cout << "Failed to connect to server\n";
+                        }
+                    });
+                }
+            }
+
+            // ASYNC
+            void Disconnect()
+            {
+                if (IsConnected())
+                    asio::post(m_asioContext, [this](){m_socket.close();});
+            }
+
+            bool IsConnected() const
             {
                 return m_socket.is_open();
             }
 
-            bool Send(const message<T>& msg);
-
             uint32_t GetID() const
             {
                 return m_id;
+            }
+
+            // ASYNC
+            void Send(const message<T>& msg)
+            {
+                asio::post(m_asioContext, [this, msg]()
+                {
+                    bool bWritingMessage = !m_qMessageOut.empty();
+                    m_qMessageOut.push_back(msg);
+                    if (!bWritingMessage)
+                        WriteHeader();
+                });
             }
 
             // ASYNC
@@ -77,7 +112,7 @@ namespace tps
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Read Header Fail\n";
+                            std::cout << "[" << m_id << "] Read Header Fail: " << ec.message() << "\n";
                             m_socket.close();
                         }
                     });
@@ -104,7 +139,7 @@ namespace tps
             // ASYNC
             void WriteHeader()
             {
-                asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().header, sizeof(message_header<T>)),
+                asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr, sizeof(message_header<T>)),
                     [this](std::error_code ec, std::size_t length)
                     {
                         if (!ec)
@@ -122,7 +157,7 @@ namespace tps
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Write Header Fail\n";
+                            std::cout << "[" << m_id << "] Write Header Fail: " << ec.message() << "\n";
                             m_socket.close();
                         }
                     });
@@ -151,7 +186,7 @@ namespace tps
             void AddToIncomingMessageQueue()
             {
                 if (m_nOwnerType == owner::server)
-                    m_qMessageIn.push_back({this->shared_from_this(), m_msgTempIn});
+                    m_qMessageIn.push_back({this->shared_from_this(), m_msgTempIn}); // server has an array of connections, so it needs to know which connection owns incoming message
                 else
                     m_qMessageIn.push_back({nullptr, m_msgTempIn}); // client has only 1 connection, this connection will own all of incoming msgs
 

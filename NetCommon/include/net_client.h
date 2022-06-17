@@ -25,16 +25,17 @@ namespace tps
                 Disconnect();
             }
 
-            bool Connect(std::string& host, uint16_t port)
+            bool Connect(const std::string& host, uint16_t port)
             {
                 try
                 {
-                    m_connection = std::make_unique<connection<T>>();
-
                     asio::ip::tcp::resolver resolver(m_context);
-//                    m_endpoints = resolver.resolve(host, std::to_string(port));
+                    asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(host, std::to_string(port));
 
-//                    m_connection->connectToServer(m_endpoints);
+                    m_connection = std::make_unique<connection<T>>(connection<T>::owner::client, m_context,
+                                                                   asio::ip::tcp::socket(m_context), m_qMessageIn);
+
+                    m_connection->ConnectToServer(endpoints);
 
                     thrContext = std::thread([this](){m_context.run();});
                 } catch (std::exception& e)
@@ -42,11 +43,12 @@ namespace tps
                     std::cout << "[-]Client exception:" << e.what() << std::endl;
                     return false;
                 }
+                return true;
             }
 
             bool Disconnect()
             {
-                if (isConnected())
+                if (IsConnected())
                 {
                     m_connection->Disconnect();
                 }
@@ -58,15 +60,21 @@ namespace tps
                 m_connection.release();
             }
 
-            bool isConnected()
+            bool IsConnected()
             {
-                if (m_connection->isConnected())
+                if (m_connection->IsConnected())
                     return true;
                 else
                     return false;
             }
 
-            tsqueue<T>& Incoming()
+            void Send(const message<T>& msg)
+            {
+                if (IsConnected())
+                    m_connection->Send(msg);
+            }
+
+            tsqueue<owned_message<T>>& Incoming()
             {
                 return m_qMessageIn;
             }

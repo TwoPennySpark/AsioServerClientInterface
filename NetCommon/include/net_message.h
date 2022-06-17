@@ -22,12 +22,12 @@ namespace tps
 
             size_t size() const
             {
-                return sizeof(message_header<T>) + body.size();
+                return body.size();
             }
 
             friend std::ostream& operator<< (std::ostream& os, const message<T>& m)
             {
-                std::cout << "ID:" << m.hdr.id << " SIZE:" << m.hdr.size();
+                std::cout << "ID:" << int(m.hdr.id) << " SIZE:" << m.body.size();
                 return os;
             }
 
@@ -73,7 +73,7 @@ namespace tps
             std::shared_ptr<connection<T>> owner = nullptr;
             message<T> msg;
 
-            friend std::ostream& operator<<(std::ostream& os, const owned_message& msg)
+            friend std::ostream& operator<<(std::ostream& os, const owned_message<T>& msg)
             {
                 os << msg.msg;
                 return os;
