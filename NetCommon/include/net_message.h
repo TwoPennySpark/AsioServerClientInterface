@@ -11,7 +11,7 @@ namespace tps
         struct message_header
         {
             T id{};
-            uint32_t size = 0; // size of the entire message + header
+            uint32_t size = 0; // size of the message(body)
         };
 
         template <typename T>
@@ -32,7 +32,7 @@ namespace tps
             }
 
             template <typename DataType>
-            friend message<T>& operator<<(message<T>& msg, DataType& data)
+            friend message<T>& operator<<(message<T>& msg, const DataType& data)
             {
                 static_assert(std::is_standard_layout<DataType>::value, "Data is too complex to be pushed");
 

@@ -49,13 +49,13 @@ namespace tps
             void push_front(const T& item)
             {
                 const std::lock_guard<std::mutex> lock(muxQueue);
-                deqQueue.emplace_front(std::move(item));
+                deqQueue.emplace_front(item);
             }
 
             void push_back(const T& item)
             {
                 const std::lock_guard<std::mutex> lock(muxQueue);
-                deqQueue.emplace_back(/*std::move*/(item));
+                deqQueue.emplace_back(item);
             }
 
             T pop_front()
