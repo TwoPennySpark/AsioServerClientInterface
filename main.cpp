@@ -156,7 +156,6 @@ int main()
     while(1)
     {
         Server.Update();
-        usleep(100*1000);
     }
 #endif
 

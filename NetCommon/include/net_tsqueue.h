@@ -3,6 +3,7 @@
 
 #include "net_common.h"
 #include <deque>
+#include <condition_variable>
 
 namespace tps
 {
@@ -50,12 +51,18 @@ namespace tps
             {
                 const std::lock_guard<std::mutex> lock(muxQueue);
                 deqQueue.emplace_front(item);
+
+                const std::lock_guard<std::mutex> ul(muxBlocking);
+                condVar.notify_one();
             }
 
             void push_back(const T& item)
             {
                 const std::lock_guard<std::mutex> lock(muxQueue);
                 deqQueue.emplace_back(item);
+
+                const std::lock_guard<std::mutex> ul(muxBlocking);
+                condVar.notify_one();
             }
 
             T pop_front()
@@ -74,9 +81,18 @@ namespace tps
                 return t;
             }
 
-        private:
+            void wait()
+            {
+                std::unique_lock<std::mutex> lock(muxBlocking);
+                condVar.wait(lock);
+            }
+
+        protected:
             std::deque<T> deqQueue;
             std::mutex muxQueue;
+
+            std::condition_variable condVar;
+            std::mutex muxBlocking;
         };
 
     }

@@ -126,8 +126,10 @@ namespace tps
             void Update(size_t nMaxMessages = std::numeric_limits<size_t>::max()) // another solution? (connect OnMessage() with connection<T> directly?)
             {
                 size_t nMessageCount = 0;
-                while (nMessageCount <= nMaxMessages && !m_qMessagesIn.empty())
+                while (nMessageCount <= nMaxMessages)
                 {
+                    if (m_qMessagesIn.empty())
+                        m_qMessagesIn.wait();
                     auto msg = m_qMessagesIn.pop_front();
                     OnMessage(msg.owner, msg.msg);
                     nMessageCount++;
