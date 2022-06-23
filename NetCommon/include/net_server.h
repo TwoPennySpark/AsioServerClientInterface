@@ -52,9 +52,10 @@ namespace tps
                 std::cout << "[SERVER]Stopped\n";
             }
 
+            // ASYNC
             void WaitForClientConnection()
             {
-                m_asioAcceptor.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket) //
+                m_asioAcceptor.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket)
                 {
                     if (!ec)
                     {
@@ -72,12 +73,12 @@ namespace tps
                         }
                         else
                         {
-                            std::cout << "[SERVER]Connection Denied\n";
+                            std::cout << "[-]Connection Denied\n";
                         }
                     }
                     else
                     {
-                        std::cout << "[SERVER] New connection error: " << ec.message() << std::endl;
+                        std::cout << "[-]Accept error: " << ec.message() << std::endl;
                     }
 
                     WaitForClientConnection();

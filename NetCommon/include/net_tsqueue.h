@@ -52,7 +52,6 @@ namespace tps
                 const std::lock_guard<std::mutex> lock(muxQueue);
                 deqQueue.emplace_front(item);
 
-                const std::lock_guard<std::mutex> ul(muxBlocking);
                 condVar.notify_one();
             }
 
@@ -61,7 +60,6 @@ namespace tps
                 const std::lock_guard<std::mutex> lock(muxQueue);
                 deqQueue.emplace_back(item);
 
-                const std::lock_guard<std::mutex> ul(muxBlocking);
                 condVar.notify_one();
             }
 
@@ -83,8 +81,8 @@ namespace tps
 
             void wait()
             {
-                std::unique_lock<std::mutex> lock(muxBlocking);
-                condVar.wait(lock);
+                std::unique_lock<std::mutex> lock(muxQueue);
+                condVar.wait(lock, [this]{return !deqQueue.empty();});
             }
 
         protected:
@@ -92,7 +90,6 @@ namespace tps
             std::mutex muxQueue;
 
             std::condition_variable condVar;
-            std::mutex muxBlocking;
         };
 
     }
