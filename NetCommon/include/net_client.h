@@ -22,10 +22,10 @@ namespace tps
 
             virtual ~client_interface()
             {
-                Disconnect();
+                disconnect();
             }
 
-            bool Connect(const std::string& host, uint16_t port)
+            bool connect(const std::string& host, uint16_t port)
             {
                 try
                 {
@@ -35,7 +35,7 @@ namespace tps
                     m_connection = std::make_unique<connection<T>>(connection<T>::owner::client, m_context,
                                                                    asio::ip::tcp::socket(m_context), m_qMessageIn);
 
-                    m_connection->ConnectToServer(endpoints);
+                    m_connection->connect_to_server(endpoints);
 
                     thrContext = std::thread([this](){m_context.run();});
                 } catch (std::exception& e)
@@ -46,35 +46,36 @@ namespace tps
                 return true;
             }
 
-            bool Disconnect()
+            void disconnect()
             {
-                if (IsConnected())
+                if (is_connected())
                 {
-                    m_connection->Disconnect();
+                    m_connection->disconnect(nullptr);
                 }
 
                 m_context.stop();
                 if (thrContext.joinable())
                     thrContext.join();
 
-                m_connection.release();
+                m_connection.reset();
             }
 
-            bool IsConnected()
+            bool is_connected()
             {
-                if (m_connection->IsConnected())
+                if (m_connection->is_connected())
                     return true;
                 else
                     return false;
             }
 
-            void Send(const message<T>& msg)
+            template <typename Type>
+            void send(Type&& msg)
             {
-                if (IsConnected())
-                    m_connection->Send(msg);
+                if (is_connected())
+                    m_connection->send(std::forward<Type>(msg), nullptr);
             }
 
-            tsqueue<owned_message<T>>& Incoming()
+            tsqueue<owned_message<T>>& incoming()
             {
                 return m_qMessageIn;
             }

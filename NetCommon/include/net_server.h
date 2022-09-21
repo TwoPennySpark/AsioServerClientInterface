@@ -22,14 +22,14 @@ namespace tps
 
             virtual ~server_interface()
             {
-                Stop();
+                stop();
             }
 
-            bool Start()
+            bool start()
             {
                 try
                 {
-                    WaitForClientConnection();
+                    wait_for_client_connection();
 
                     m_threadContext = std::thread([this](){m_asioContext.run();});
                 } catch (std::exception& e)
@@ -42,7 +42,7 @@ namespace tps
                 return true;
             }
 
-            void Stop()
+            void stop()
             {
                 m_asioContext.stop();
 
@@ -53,23 +53,23 @@ namespace tps
             }
 
             // ASYNC
-            void WaitForClientConnection()
+            void wait_for_client_connection()
             {
                 m_asioAcceptor.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket)
                 {
                     if (!ec)
                     {
-                        std::cout << "[SERVER] New connection: " << socket.remote_endpoint() << std::endl;
+//                        std::cout << "[SERVER] New connection: " << socket.remote_endpoint() << std::endl;
                         std::shared_ptr<connection<T>> newconn = std::make_shared<connection<T>>(
                                     connection<T>::owner::server, m_asioContext, std::move(socket), m_qMessagesIn);
 
-                        if (OnClientConnect(newconn))
+                        if (on_client_connect(newconn))
                         {
                             m_deqConnections.push_back(std::move(newconn));
 
-                            m_deqConnections.back()->ConnectToClient(nIDCounter++);
+                            m_deqConnections.back()->connect_to_client(nIDCounter++, this);
 
-                            std::cout << "[" << m_deqConnections.back()->GetID() << "] Connection approved\n";
+                            std::cout << "[" << m_deqConnections.back()->get_ID() << "] Connection approved\n";
                         }
                         else
                         {
@@ -81,50 +81,26 @@ namespace tps
                         std::cout << "[-]Accept error: " << ec.message() << std::endl;
                     }
 
-                    WaitForClientConnection();
+                    wait_for_client_connection();
                 });
             }
 
-            void MessageClient(std::shared_ptr<connection<T>> client, const message<T>& msg)
+            template <typename Type>
+            void message_client(std::shared_ptr<connection<T>>& client, Type&& msg)
             {
-                if (client && client->isConnected()) // Check every time?
-                {
-                    client->Send(msg);
-                }
-                else
-                {
-                    OnClientDisconnect(client);
-                    client.reset();
-                    m_deqConnections.erase(
-                                std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
-                }
+                client->send(std::forward<Type>(msg), this);
             }
 
-            void MessageAllClients(const message<T>& msg, std::shared_ptr<connection<T>> pIgnoreClient = nullptr)
+            void message_all_clients(const message<T>& msg, std::shared_ptr<connection<T>> pIgnoreClient = nullptr)
             {
-                bool bInvalidClientExists = false;
-
                 for (auto& client: m_deqConnections)
                 {
-                    if (client && client->IsConnected())
-                    {
-                        if (client != pIgnoreClient)
-                            client->Send(msg);
-                    }
-                    else
-                    {
-                        OnClientDisconnect(client);
-                        client.reset();
-                        bInvalidClientExists = true;
-                    }
+                    if (client != pIgnoreClient)
+                        client->send(msg, this);
                 }
-
-                if (bInvalidClientExists)
-                    m_deqConnections.erase(
-                                std::remove(m_deqConnections.begin(), m_deqConnections.end(), nullptr), m_deqConnections.end());
             }
 
-            void Update(size_t nMaxMessages = std::numeric_limits<size_t>::max()) // another solution? (connect OnMessage() with connection<T> directly?)
+            void update(size_t nMaxMessages = std::numeric_limits<size_t>::max())
             {
                 size_t nMessageCount = 0;
                 while (nMessageCount <= nMaxMessages)
@@ -132,27 +108,40 @@ namespace tps
                     if (m_qMessagesIn.empty())
                         m_qMessagesIn.wait();
                     auto msg = m_qMessagesIn.pop_front();
-                    OnMessage(msg.owner, msg.msg);
+                    on_message(msg.owner, msg.msg);
                     nMessageCount++;
                 }
             }
 
+            void delete_client(std::shared_ptr<connection<T>> client)
+            {
+                m_deqConnections.erase(
+                            std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
+            }
+
         protected:
-            virtual bool OnClientConnect(std::shared_ptr<connection<T>> client)
+            virtual bool on_client_connect(std::shared_ptr<connection<T>>)
             {
-                return false;
+                return true;
             }
 
-            virtual void OnClientDisconnect(std::shared_ptr<connection<T>> client)
-            {
-
-            }
-
-            virtual void OnMessage(std::shared_ptr<connection<T>> client, message<T>& msg)
+            virtual void on_message(std::shared_ptr<connection<T>>, message<T>&)
             {
 
             }
 
+        public:
+            virtual bool on_first_message(std::shared_ptr<connection<T>>, message<T>&)
+            {
+                return true;
+            }
+
+            virtual void on_client_disconnect(std::shared_ptr<connection<T>>)
+            {
+
+            }
+
+        protected:
             tsqueue<owned_message<T>> m_qMessagesIn;
 
             asio::io_context m_asioContext;

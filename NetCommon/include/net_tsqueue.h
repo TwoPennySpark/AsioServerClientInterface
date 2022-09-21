@@ -47,18 +47,20 @@ namespace tps
                 return deqQueue.back();
             }
 
-            void push_front(const T& item)
+            template <typename Type>
+            void push_front(Type&& item)
             {
                 const std::lock_guard<std::mutex> lock(muxQueue);
-                deqQueue.emplace_front(item);
+                deqQueue.emplace_front(std::forward<Type>(item));
 
                 condVar.notify_one();
             }
 
-            void push_back(const T& item)
+            template <typename Type>
+            void push_back(Type&& item)
             {
                 const std::lock_guard<std::mutex> lock(muxQueue);
-                deqQueue.emplace_back(item);
+                deqQueue.emplace_back(std::forward<Type>(item));
 
                 condVar.notify_one();
             }

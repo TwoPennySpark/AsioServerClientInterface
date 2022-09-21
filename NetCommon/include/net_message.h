@@ -25,43 +25,106 @@ namespace tps
                 return body.size();
             }
 
-            friend std::ostream& operator<< (std::ostream& os, const message<T>& m)
-            {
-                std::cout << "ID:" << int(m.hdr.id) << " SIZE:" << m.body.size();
-                return os;
-            }
-
+            // PUSH
             template <typename DataType>
-            friend message<T>& operator<<(message<T>& msg, const DataType& data)
+            message& operator<<(const DataType& data)
             {
                 static_assert(std::is_standard_layout<DataType>::value, "Data is too complex to be pushed");
 
-                size_t end = msg.body.size();
+                if (m_end+sizeof(data) > body.size())
+                    body.resize(m_end+sizeof(data));
 
-                msg.body.resize(msg.body.size()+sizeof(data));
+                std::memcpy(&body[m_end], &data, sizeof(data));
 
-                std::memcpy(msg.body.data()+end, &data, sizeof(data));
+                m_end += sizeof(data);
+                hdr.size += sizeof(data);
 
-                msg.hdr.size += sizeof(data);
-
-                return msg;
+                return *this;
             }
 
+            message& operator<<(const std::string& data)
+            {
+                if (m_end+data.size() > body.size())
+                    body.resize(m_end+data.size());
+
+                std::memcpy(&body[m_end], data.data(), data.size());
+                m_end += data.size();
+                hdr.size += sizeof(data);
+
+                return *this;
+            }
+
+            message& operator<<(const std::vector<uint8_t>& data)
+            {
+                if (m_end+data.size() > body.size())
+                    body.resize(m_end+data.size());
+
+                std::memcpy(&body[m_end], data.data(), data.size());
+                m_end += data.size();
+                hdr.size += sizeof(data);
+
+                return *this;
+            }
+
+            // POP
             template <typename DataType>
-            friend message<T>& operator>>(message<T>& msg, DataType& data)
+            const message& operator>>(DataType& data)
             {
                 static_assert(std::is_standard_layout<DataType>::value, "Data is too complex to be poped");
 
-                size_t i = msg.body.size()-sizeof(data);
+                if (body.size() - m_start < sizeof(data))
+                    throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
 
-                std::memcpy(&data, msg.body.data()+i, sizeof(data));
+                std::memcpy(&data, &body[m_start], sizeof(data));
 
-                msg.body.resize(i);
+                m_start += sizeof(data);
+                hdr.size -= sizeof(data);
 
-                msg.hdr.size -= sizeof(data);
+                if (m_start == m_end)
+                    m_start = m_end = 0;
 
-                return msg;
+                return *this;
             }
+
+            const message& operator>>(std::string& data)
+            {
+                if (body.size() - m_start < data.size())
+                    throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
+
+                std::memcpy(&data[0], &body[m_start], data.size());
+
+                m_start += data.size();
+                hdr.size -= sizeof(data);
+
+                if (m_start == m_end)
+                    m_start = m_end = 0;
+
+                return *this;
+            }
+
+            const message& operator>>(std::vector<uint8_t>& data)
+            {
+                if (body.size() - m_start < data.size())
+                    throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
+
+                std::memcpy(data.data(), &body[m_start], data.size());
+
+                m_start += data.size();
+                hdr.size -= sizeof(data);
+
+                if (m_start == m_end)
+                    m_start = m_end = 0;
+
+                return *this;
+            }
+
+            uint32_t data_left_to_pop()
+            {
+                return body.size() - m_start;
+            }
+
+        private:
+            mutable uint32_t m_start = 0, m_end = 0;
         };
 
         template <typename T>
@@ -72,12 +135,6 @@ namespace tps
         {
             std::shared_ptr<connection<T>> owner = nullptr;
             message<T> msg;
-
-            friend std::ostream& operator<<(std::ostream& os, const owned_message<T>& msg)
-            {
-                os << msg.msg;
-                return os;
-            }
         };
     }
 }
