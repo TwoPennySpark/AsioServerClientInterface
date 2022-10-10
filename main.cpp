@@ -22,7 +22,7 @@ protected:
         tps::net::message<CustomMsgTypes> msg;
         msg.hdr.id = CustomMsgTypes::ServerAccept;
 
-        client->send(msg, this);
+        client->send(msg);
 
         return true;
     }
@@ -39,7 +39,7 @@ protected:
         {
             case CustomMsgTypes::ServerPing:
                 std::cout << "[" << client->get_ID() << "]" << "Server Ping\n";
-                client->send(msg, this);
+                client->send(msg);
                 break;
             case CustomMsgTypes::MessageAll:
             {
@@ -80,7 +80,7 @@ public:
     }
 };
 
-//#define CLIENT
+#define CLIENT
 
 int main()
 {

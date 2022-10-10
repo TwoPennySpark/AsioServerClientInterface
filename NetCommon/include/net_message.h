@@ -7,22 +7,25 @@ namespace tps
 {
     namespace net
     {
+        #pragma pack(push,1)
         template <typename T>
         struct message_header
         {
-            T id{};
-            uint32_t size = 0; // size of the message(body)
+            T id;
+            uint32_t size = 0;
         };
+        #pragma pack(pop)
 
         template <typename T>
         struct message
         {
             message_header<T> hdr{};
+
             std::vector<uint8_t> body;
 
             size_t size() const
             {
-                return body.size();
+                return hdr.size;
             }
 
             // PUSH
@@ -49,7 +52,7 @@ namespace tps
 
                 std::memcpy(&body[m_end], data.data(), data.size());
                 m_end += data.size();
-                hdr.size += sizeof(data);
+                hdr.size += data.size();
 
                 return *this;
             }
@@ -61,14 +64,14 @@ namespace tps
 
                 std::memcpy(&body[m_end], data.data(), data.size());
                 m_end += data.size();
-                hdr.size += sizeof(data);
+                hdr.size += data.size();
 
                 return *this;
             }
 
             // POP
             template <typename DataType>
-            const message& operator>>(DataType& data)
+            message& operator>>(DataType& data)
             {
                 static_assert(std::is_standard_layout<DataType>::value, "Data is too complex to be poped");
 
@@ -86,15 +89,16 @@ namespace tps
                 return *this;
             }
 
-            const message& operator>>(std::string& data)
+            message& operator>>(std::string& data)
             {
+                // Request to pop an amount of data that exceeds the size of the message
                 if (body.size() - m_start < data.size())
                     throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
 
                 std::memcpy(&data[0], &body[m_start], data.size());
 
                 m_start += data.size();
-                hdr.size -= sizeof(data);
+                hdr.size -= data.size();
 
                 if (m_start == m_end)
                     m_start = m_end = 0;
@@ -102,25 +106,21 @@ namespace tps
                 return *this;
             }
 
-            const message& operator>>(std::vector<uint8_t>& data)
+            message& operator>>(std::vector<uint8_t>& data)
             {
+                // Request to pop an amount of data that exceeds the size of the message
                 if (body.size() - m_start < data.size())
                     throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
 
                 std::memcpy(data.data(), &body[m_start], data.size());
 
                 m_start += data.size();
-                hdr.size -= sizeof(data);
+                hdr.size -= data.size();
 
                 if (m_start == m_end)
                     m_start = m_end = 0;
 
                 return *this;
-            }
-
-            uint32_t data_left_to_pop()
-            {
-                return body.size() - m_start;
             }
 
         private:
