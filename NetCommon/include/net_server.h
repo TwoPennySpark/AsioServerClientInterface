@@ -1,10 +1,7 @@
 #ifndef NET_SERVER_H
 #define NET_SERVER_H
 
-#include "net_common.h"
 #include "net_connection.h"
-#include "net_message.h"
-#include "net_tsqueue.h"
 
 namespace tps
 {
@@ -59,17 +56,15 @@ namespace tps
                 {
                     if (!ec)
                     {
-//                        std::cout << "[SERVER] New connection: " << socket.remote_endpoint() << std::endl;
+                        std::cout << "[SERVER] New connection: " << socket.remote_endpoint() << std::endl;
                         std::shared_ptr<connection<T>> newconn = std::make_shared<connection<T>>(
                                     connection<T>::owner::server, this, m_asioContext, std::move(socket), m_qMessagesIn);
 
                         if (on_client_connect(newconn))
                         {
-                            m_deqConnections.push_back(std::move(newconn));
+                            newconn->connect_to_client(m_nIDCounter++);
 
-                            m_deqConnections.back()->connect_to_client(m_nIDCounter++);
-
-                            std::cout << "[" << m_deqConnections.back()->get_ID() << "] Connection approved\n";
+                            std::cout << "[" << newconn->get_ID() << "] Connection approved\n";
                         }
                         else
                         {
@@ -91,32 +86,14 @@ namespace tps
                 client->send(std::forward<Type>(msg));
             }
 
-            void message_all_clients(const message<T>& msg, std::shared_ptr<connection<T>> pIgnoreClient = nullptr)
+            void update()
             {
-                for (auto& client: m_deqConnections)
+                while (1)
                 {
-                    if (client != pIgnoreClient)
-                        client->send(msg);
-                }
-            }
-
-            void update(size_t nMaxMessages = std::numeric_limits<size_t>::max())
-            {
-                size_t nMessageCount = 0;
-                while (nMessageCount <= nMaxMessages)
-                {
-                    if (m_qMessagesIn.empty())
-                        m_qMessagesIn.wait();
+                    m_qMessagesIn.wait();
                     auto msg = m_qMessagesIn.pop_front();
                     on_message(msg.owner, msg.msg);
-                    nMessageCount++;
                 }
-            }
-
-            void delete_client(std::shared_ptr<connection<T>> client)
-            {
-                m_deqConnections.erase(
-                            std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
             }
 
         protected:
@@ -148,8 +125,6 @@ namespace tps
             std::thread m_threadContext;
 
             asio::ip::tcp::acceptor m_asioAcceptor;
-
-            std::deque<std::shared_ptr<connection<T>>> m_deqConnections;
 
             uint32_t m_nIDCounter = 10000;
         };

@@ -1,10 +1,6 @@
 #ifndef NET_CLIENT_H
 #define NET_CLIENT_H
 
-#include "net_common.h"
-#include "net_message.h"
-#include "net_tsqueue.h"
-#include "net_connection.h"
 #include "net_server.h"
 
 namespace tps
@@ -34,7 +30,7 @@ namespace tps
                     asio::ip::tcp::resolver resolver(m_context);
                     asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(host, std::to_string(port));
 
-                    m_connection = std::make_unique<connection<T>>(connection<T>::owner::client, nullptr, m_context,
+                    m_connection = std::make_shared<connection<T>>(connection<T>::owner::client, nullptr, m_context,
                                                                    asio::ip::tcp::socket(m_context), m_qMessageIn);
 
                     m_connection->connect_to_server(endpoints);
@@ -82,7 +78,7 @@ namespace tps
 
             asio::ip::tcp::socket m_socket;
 
-            std::unique_ptr<connection<T>> m_connection;
+            std::shared_ptr<connection<T>> m_connection;
 
         private:
             tsqueue<owned_message<T>> m_qMessageIn;

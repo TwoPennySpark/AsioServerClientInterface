@@ -1,7 +1,6 @@
 #ifndef NET_CONNECTION_H
 #define NET_CONNECTION_H
 
-#include "net_common.h"
 #include "net_message.h"
 #include "net_tsqueue.h"
 
@@ -31,44 +30,35 @@ namespace tps
 
             ~connection()
             {
-//                std::cout << "[!]CONNECTION DELETED: "<< m_id << "\n";
+                std::cout << "[!]CONNECTION DELETED: "<< m_id << "\n";
             }
 
             void connect_to_client(uint32_t uid)
             {
-                if (m_nOwnerType == owner::server)
+                if (is_connected())
                 {
-                    if (m_socket.is_open())
-                    {
-                        m_id = uid;
+                    m_id = uid;
 
-                        read_first_hdr();
-                    }
+                    read_first_hdr();
                 }
             }
 
             // ASYNC
             void connect_to_server(const asio::ip::tcp::resolver::results_type& endpoints)
             {
-                if (m_nOwnerType == owner::client)
+                asio::async_connect(m_socket, endpoints, [this](std::error_code ec, asio::ip::tcp::endpoint)
                 {
-                    asio::async_connect(m_socket, endpoints, [this](std::error_code ec, asio::ip::tcp::endpoint)
-                    {
-                        if (!ec)
-                            read_header();
-                        else
-                        {
-                            std::cout << "[-]Failed to connect to server\n";
-                            disconnect();
-                        }
-                    });
-                }
+                    if (!ec)
+                        read_header();
+                    else
+                        throw std::runtime_error("[-]Failed to connect to server\n");
+                });
             }
 
             // ASYNC
             void disconnect()
             {
-                asio::post(m_asioContext, [this]() { shutdown_cleanup(); });
+                asio::post(m_asioContext, [me = this->shared_from_this()] { me->m_server->on_client_disconnect(me); });
             }
 
             bool is_connected() const
@@ -84,34 +74,19 @@ namespace tps
             void set_timer(uint32_t mls)
             {
                 m_timer = std::make_pair<asio::deadline_timer, uint32_t>
-                        (asio::deadline_timer(m_asioContext, posix_time::millisec(mls)), uint32_t(mls));
-            }
-
-            void shutdown_cleanup(bool bNotify = true)
-            {
-                if (is_connected())
-                {
-                    m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
-                    m_socket.close();
-                    if (m_nOwnerType == owner::server)
-                    {
-                        if (bNotify)
-                            m_server->on_client_disconnect(this->shared_from_this());
-                        m_server->delete_client(this->shared_from_this());
-                    }
-                }
+                    (asio::deadline_timer(m_asioContext, posix_time::millisec(mls)), uint32_t(mls));
             }
 
             // ASYNC
             template <typename Type>
             void send(Type&& msg)
             {
-                asio::post(m_asioContext, [this, msg = std::forward<Type>(msg)]() mutable
+                asio::post(m_asioContext, [me = this->shared_from_this(), msg = std::forward<Type>(msg)]() mutable
                 {
-                    bool bWritingMessage = !m_qMessageOut.empty();
-                    m_qMessageOut.push_back(std::forward<Type>(msg));
+                    bool bWritingMessage = !me->m_qMessageOut.empty();
+                    me->m_qMessageOut.push_back(std::forward<Type>(msg));
                     if (!bWritingMessage)
-                        write_header();
+                        me->write_header();
                 });
             }
 
@@ -126,25 +101,25 @@ namespace tps
                     });
 
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(message_header<T>)),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                            if (m_timer)
-                                m_timer->first.expires_from_now(boost::posix_time::millisec(m_timer->second));
+                            if (me->m_timer)
+                                me->m_timer->first.expires_from_now(boost::posix_time::millisec(me->m_timer->second));
 
-                            if (m_msgTempIn.hdr.size > 0)
+                            if (me->m_msgTempIn.hdr.size > 0)
                             {
-                                m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
-                                read_body();
+                                me->m_msgTempIn.body.resize(me->m_msgTempIn.hdr.size);
+                                me->read_body();
                             }
                             else
-                                add_to_incoming_message_queue();
+                                me->add_to_incoming_message_queue();
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Read Header Fail: " << ec.message() << "\n";
-                            shutdown_cleanup();
+                            std::cout << "[" << me->m_id << "] Read Header Fail: " << ec.message() << "\n";
+                            me->m_server->on_client_disconnect(me);
                         }
                     });
             }
@@ -153,14 +128,14 @@ namespace tps
             void read_body()
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
-                            add_to_incoming_message_queue();
+                            me->add_to_incoming_message_queue();
                         else
                         {
-                            std::cout << "[" << m_id << "] Read Body Fail\n";
-                            shutdown_cleanup();
+                            std::cout << "[" << me->m_id << "] Read Body Fail\n";
+                            me->m_server->on_client_disconnect(me);
                         }
                     });
             }
@@ -169,23 +144,23 @@ namespace tps
             void write_header()
             {
                 asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr, sizeof(message_header<T>)),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                            if (m_qMessageOut.front().body.size() > 0)
-                                write_body();
+                            if (me->m_qMessageOut.front().body.size() > 0)
+                                me->write_body();
                             else
                             {
-                                m_qMessageOut.pop_front();
-                                if (!m_qMessageOut.empty())
-                                    write_header();
+                                me->m_qMessageOut.pop_front();
+                                if (!me->m_qMessageOut.empty())
+                                    me->write_header();
                             }
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Write Header Fail: " << ec.message() << "\n";
-                            shutdown_cleanup();
+                            std::cout << "[" << me->m_id << "] Write Header Fail: " << ec.message() << "\n";
+                            me->m_server->on_client_disconnect(me);
                         }
                     });
             }
@@ -195,18 +170,18 @@ namespace tps
             {
                 asio::async_write(m_socket, asio::buffer(m_qMessageOut.front().body.data(),
                                                          m_qMessageOut.front().body.size()),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                                m_qMessageOut.pop_front();
-                                if (!m_qMessageOut.empty())
-                                    write_header();
+                                me->m_qMessageOut.pop_front();
+                                if (!me->m_qMessageOut.empty())
+                                    me->write_header();
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Write Body Fail\n";
-                            shutdown_cleanup();
+                            std::cout << "[" << me->m_id << "] Write Body Fail\n";
+                            me->m_server->on_client_disconnect(me);
                         }
                     });
             }
@@ -227,31 +202,25 @@ namespace tps
             void read_first_hdr()
             {
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(message_header<T>)),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()] (const std::error_code& ec, std::size_t) mutable
                     {
                         if (!ec)
                         {
-                            if (m_msgTempIn.hdr.size > 0)
+                            if (me->m_msgTempIn.hdr.size > 0)
                             {
-                                m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
-                                read_first_body();
+                                me->m_msgTempIn.body.resize(me->m_msgTempIn.hdr.size);
+                                me->read_first_body();
                             }
                             else
                             {
-                                if (m_server->on_first_message(this->shared_from_this(), m_msgTempIn))
-                                    add_to_incoming_message_queue();
+                                if (me->m_server->on_first_message(me->shared_from_this(), me->m_msgTempIn))
+                                    me->add_to_incoming_message_queue();
                                 else
-                                {
-                                    std::cout << "[" << m_id << "] Invalid First Msg Received\n";
-                                    shutdown_cleanup(false);
-                                }
+                                    std::cout << "[" << me->m_id << "] Invalid First Msg Received\n";
                             }
                         }
                         else
-                        {
-                            std::cout << "[" << m_id << "] Read First Header Fail: " << ec.message() << "\n";
-                            shutdown_cleanup(false);
-                        }
+                            std::cout << "[" << me->m_id << "] Read First Header Fail: " << ec.message() << "\n";
                     });
             }
 
@@ -259,23 +228,17 @@ namespace tps
             void read_first_body()
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                            if (m_server->on_first_message(this->shared_from_this(), m_msgTempIn))
-                                add_to_incoming_message_queue();
+                            if (me->m_server->on_first_message(me, me->m_msgTempIn))
+                                me->add_to_incoming_message_queue();
                             else
-                            {
-                                std::cout << "[" << m_id << "] Invalid First Msg Received\n";
-                                shutdown_cleanup(false);
-                            }
+                                std::cout << "[" << me->m_id << "] Invalid First Msg Received\n";
                         }
                         else
-                        {
-                            std::cout << "[" << m_id << "] Read First Body Fail\n";
-                            shutdown_cleanup(false);
-                        }
+                            std::cout << "[" << me->m_id << "] Read First Body Fail\n";
                     });
             }
 
@@ -286,17 +249,16 @@ namespace tps
 
             tsqueue<message<T>> m_qMessageOut;
 
+            message<T> m_msgTempIn;
             tsqueue<owned_message<T>>& m_qMessageIn;
 
-            message<T> m_msgTempIn;
-
+            server_interface<T>* m_server;
             owner m_nOwnerType = owner::server;
 
             uint32_t m_id = 0;
 
             std::optional<std::pair<asio::deadline_timer, uint32_t>> m_timer;
 			
-            server_interface<T>* m_server;
         };
     }
 }

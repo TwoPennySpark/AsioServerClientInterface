@@ -1,6 +1,9 @@
-#include "NetCommon/include/net_common.h"
-#include "NetCommon/include/net_server.h"
-#include "NetCommon/include/net_client.h"
+#include "net_common.h"
+#include "net_server.h"
+#include "net_client.h"
+
+const uint16_t PORT = 50010;
+const std::string IP = "192.168.1.64";
 
 enum class CustomMsgTypes: uint32_t
 {
@@ -23,6 +26,7 @@ protected:
         msg.hdr.id = CustomMsgTypes::ServerAccept;
 
         client->send(msg);
+        clients.emplace_back(std::move(client));
 
         return true;
     }
@@ -30,6 +34,7 @@ protected:
     virtual void on_client_disconnect(std::shared_ptr<tps::net::connection<CustomMsgTypes>> client) override
     {
         std::cout << "Removing client [" << client->get_ID() << "]\n";
+        clients.erase(std::remove(clients.begin(), clients.end(), client), clients.end());
     }
 
     virtual void on_message(std::shared_ptr<tps::net::connection<CustomMsgTypes>> client,
@@ -47,7 +52,15 @@ protected:
                 tps::net::message<CustomMsgTypes> msg;
                 msg.hdr.id = CustomMsgTypes::ServerMessage;
                 msg << client->get_ID();
-                message_all_clients(msg, client);
+
+                for (auto& c: clients)
+                {
+                    if (client != c)
+                    {
+                        std::cout << "SENDING TO:" << c->get_ID() << "\n";
+                        c->send(msg);
+                    }
+                }
                 break;
             }
             default:
@@ -55,6 +68,9 @@ protected:
                 break;
         }
     }
+
+private:
+    std::deque<std::shared_ptr<tps::net::connection<CustomMsgTypes>>> clients;
 };
 
 class CustomClient: public tps::net::client_interface<CustomMsgTypes>
@@ -80,13 +96,13 @@ public:
     }
 };
 
-#define CLIENT
+//#define CLIENT
 
 int main()
 {
 #ifdef CLIENT
     CustomClient client;
-    client.connect("127.0.0.1", 5000);
+    client.connect(IP, PORT);
 
     std::cout << "Enter 1 to send ping msg to the server\n"
                  "Enter 2 to send broadcast msg to all client connected to the server\n"
@@ -156,13 +172,9 @@ int main()
     }
 
 #else
-    CustomServer server(5000);
+    CustomServer server(PORT);
     server.start();
-
-    while(1)
-    {
-        server.update();
-    }
+    server.update();
 #endif
 
     return 0;
