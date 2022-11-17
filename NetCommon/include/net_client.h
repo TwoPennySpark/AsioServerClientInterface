@@ -48,7 +48,6 @@ namespace tps
             {
                 m_connection->disconnect();
 
-                m_context.stop();
                 if (thrContext.joinable())
                     thrContext.join();
 

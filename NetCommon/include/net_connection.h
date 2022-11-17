@@ -58,7 +58,21 @@ namespace tps
             // ASYNC
             void disconnect()
             {
-                asio::post(m_asioContext, [me = this->shared_from_this()] { me->m_server->on_client_disconnect(me); });
+                asio::post(m_asioContext, [me = this->shared_from_this()]
+                {
+                    if (me->is_connected())
+                    {
+                        if (me->m_nOwnerType == owner::server)
+                            me->bNotifyServer = false;
+                        me->m_socket.cancel();
+                    }
+                });
+            }
+
+            void notify_server()
+            {
+                if (m_nOwnerType == owner::server && bNotifyServer)
+                    m_server->on_client_disconnect(this->shared_from_this());
             }
 
             bool is_connected() const
@@ -119,7 +133,7 @@ namespace tps
                         else
                         {
                             std::cout << "[" << me->m_id << "] Read Header Fail: " << ec.message() << "\n";
-                            me->m_server->on_client_disconnect(me);
+                            me->notify_server();
                         }
                     });
             }
@@ -135,7 +149,7 @@ namespace tps
                         else
                         {
                             std::cout << "[" << me->m_id << "] Read Body Fail\n";
-                            me->m_server->on_client_disconnect(me);
+                            me->notify_server();
                         }
                     });
             }
@@ -160,7 +174,7 @@ namespace tps
                         else
                         {
                             std::cout << "[" << me->m_id << "] Write Header Fail: " << ec.message() << "\n";
-                            me->m_server->on_client_disconnect(me);
+                            me->notify_server();
                         }
                     });
             }
@@ -181,7 +195,7 @@ namespace tps
                         else
                         {
                             std::cout << "[" << me->m_id << "] Write Body Fail\n";
-                            me->m_server->on_client_disconnect(me);
+                            me->notify_server();
                         }
                     });
             }
@@ -252,6 +266,7 @@ namespace tps
             message<T> m_msgTempIn;
             tsqueue<owned_message<T>>& m_qMessageIn;
 
+            bool bNotifyServer = true;
             server_interface<T>* m_server;
             owner m_nOwnerType = owner::server;
 

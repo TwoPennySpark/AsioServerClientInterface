@@ -8,10 +8,10 @@ const std::string IP = "192.168.1.64";
 enum class CustomMsgTypes: uint32_t
 {
     ServerAccept,
-    ServerDeny,
     ServerPing,
+    ServerMessage,
     MessageAll,
-    ServerMessage
+    Error
 };
 
 class CustomServer: public tps::net::server_interface<CustomMsgTypes>
@@ -20,35 +20,44 @@ public:
     CustomServer(uint16_t nPort): tps::net::server_interface<CustomMsgTypes>(nPort) {}
 
 protected:
+    // this method runs in network thread
     virtual bool on_client_connect(std::shared_ptr<tps::net::connection<CustomMsgTypes>> client) override
     {
         tps::net::message<CustomMsgTypes> msg;
         msg.hdr.id = CustomMsgTypes::ServerAccept;
 
         client->send(msg);
-        clients.emplace_back(std::move(client));
+        m_qMessagesIn.push_back(tps::net::owned_message<CustomMsgTypes>({client, msg}));
 
         return true;
     }
 
+    // this method runs in network thread
     virtual void on_client_disconnect(std::shared_ptr<tps::net::connection<CustomMsgTypes>> client) override
     {
-        std::cout << "Removing client [" << client->get_ID() << "]\n";
-        clients.erase(std::remove(clients.begin(), clients.end(), client), clients.end());
+        tps::net::message<CustomMsgTypes> msg;
+        msg.hdr.id = CustomMsgTypes::Error;
+
+        m_qMessagesIn.push_back(tps::net::owned_message<CustomMsgTypes>({std::move(client), std::move(msg)}));
     }
 
+    // this method runs in main thread
     virtual void on_message(std::shared_ptr<tps::net::connection<CustomMsgTypes>> client,
                            tps::net::message<CustomMsgTypes>& msg) override
     {
         switch (msg.hdr.id)
         {
+            case CustomMsgTypes::ServerAccept:
+                std::cout << "Adding client\n";
+                clients.emplace_back(std::move(client));
+                break;
             case CustomMsgTypes::ServerPing:
-                std::cout << "[" << client->get_ID() << "]" << "Server Ping\n";
+                std::cout << "Server Ping\n";
                 client->send(msg);
                 break;
             case CustomMsgTypes::MessageAll:
             {
-                std::cout << "[" << client->get_ID() << "]" << "Message All\n";
+                std::cout << "Message All\n";
                 tps::net::message<CustomMsgTypes> msg;
                 msg.hdr.id = CustomMsgTypes::ServerMessage;
                 msg << client->get_ID();
@@ -56,13 +65,14 @@ protected:
                 for (auto& c: clients)
                 {
                     if (client != c)
-                    {
-                        std::cout << "SENDING TO:" << c->get_ID() << "\n";
                         c->send(msg);
-                    }
                 }
                 break;
             }
+            case CustomMsgTypes::Error:
+                std::cout << "Removing client\n";
+                clients.erase(std::remove(clients.begin(), clients.end(), client), clients.end());
+                break;
             default:
                 std::cout << "[-]Unknown type of msg: " << uint32_t(msg.hdr.id) << "\n";
                 break;
@@ -105,12 +115,12 @@ int main()
     client.connect(IP, PORT);
 
     std::cout << "Enter 1 to send ping msg to the server\n"
-                 "Enter 2 to send broadcast msg to all client connected to the server\n"
+                 "Enter 2 to send broadcast msg to all clients connected to the server\n"
                  "Enter 3 to exit\n";
 
     // get input from user in separate thread
     tps::net::tsqueue<int>input;
-    std::thread InputThread = std::thread([&input]()
+    std::thread([&input]()
     {
         while (1)
         {
@@ -122,51 +132,50 @@ int main()
                 // in case stoi fails
             }
         }
-    });
+    }).detach();
 
     while (1)
     {
-        if (client.is_connected())
+        if (!input.empty())
         {
-            if (!input.empty())
+            auto cmd = input.pop_front();
+            switch (cmd)
             {
-                switch (input.pop_front())
-                {
-                    case 1: client.ping_server(); break;
-                    case 2: client.message_all(); break;
-                    case 3: return 0;
-                }
+                case 1: client.ping_server(); break;
+                case 2: client.message_all(); break;
+                case 3: client.disconnect();  return 0;
+                default: std::cout << "[-]Unknown command:" << cmd << "\n"; break;
             }
+        }
 
-            // if there is a new message in the receiving queue
-            if (!client.incoming().empty())
+        // if there is a new message in the receiving queue
+        if (!client.incoming().empty())
+        {
+            tps::net::message<CustomMsgTypes> msg = client.incoming().pop_front().msg;
+            switch (msg.hdr.id)
             {
-                tps::net::message<CustomMsgTypes> msg = client.incoming().pop_front().msg;
-                switch (msg.hdr.id)
+                case CustomMsgTypes::ServerAccept:
+                    std::cout << "Server accepted connection\n";
+                    break;
+                case CustomMsgTypes::ServerPing:
                 {
-                    case CustomMsgTypes::ServerAccept:
-                        std::cout << "Server accepted connection\n";
-                        break;
-                    case CustomMsgTypes::ServerPing:
-                    {
-                        std::chrono::system_clock::time_point timeNow = std::chrono::system_clock::now();
-                        std::chrono::system_clock::time_point timeThen;
-                        msg >> timeThen;
-                        auto timeDiff = std::chrono::duration<double>(timeNow - timeThen);
-                        std::cout << "Ping:" << timeDiff.count() << "\n";
-                        break;
-                    }
-                    case CustomMsgTypes::ServerMessage:
-                    {
-                        uint32_t clientID = 0;
-                        msg >> clientID;
-                        std::cout << "Broadcast from:" << clientID << "\n";
-                        break;
-                    }
-                default:
-                    std::cout << "[-]Unknown type of msg: " << uint32_t(msg.hdr.id) << "\n";
+                    std::chrono::system_clock::time_point timeNow = std::chrono::system_clock::now();
+                    std::chrono::system_clock::time_point timeThen;
+                    msg >> timeThen;
+                    auto timeDiff = std::chrono::duration<double>(timeNow - timeThen);
+                    std::cout << "Ping:" << timeDiff.count() << "\n";
                     break;
                 }
+                case CustomMsgTypes::ServerMessage:
+                {
+                    uint32_t clientID = 0;
+                    msg >> clientID;
+                    std::cout << "Broadcast from:" << clientID << "\n";
+                    break;
+                }
+            default:
+                std::cout << "[-]Unknown type of msg: " << uint32_t(msg.hdr.id) << "\n";
+                break;
             }
         }
     }
