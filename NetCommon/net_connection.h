@@ -23,7 +23,7 @@ namespace tps
             };
 
             connection(owner parent, server_interface<T>* _server, asio::io_context& asioContext, asio::ip::tcp::socket socket, tsqueue<owned_message<T>>& qIn):
-                       m_socket(std::move(socket)), m_asioContext(asioContext), m_qMessageIn(qIn), m_nOwnerType(parent), m_server(_server)
+                       m_socket(std::move(socket)), m_asioContext(asioContext), m_qMessageIn(qIn), m_nOwnerType(parent), m_server(_server), m_writeStrand(asioContext)
             {
 
             }
@@ -44,14 +44,18 @@ namespace tps
             }
 
             // ASYNC
-            void connect_to_server(const asio::ip::tcp::resolver::results_type& endpoints)
+            void connect_to_server(const asio::ip::tcp::resolver::results_type& endpoints, std::promise<bool>& connectPromise)
             {
-                asio::async_connect(m_socket, endpoints, [this](std::error_code ec, asio::ip::tcp::endpoint)
+                asio::async_connect(m_socket, endpoints, [this, connectPromise = std::move(connectPromise)]
+                (std::error_code ec, asio::ip::tcp::endpoint) mutable
                 {
                     if (!ec)
+                    {
+                        connectPromise.set_value(true);
                         read_header();
+                    }
                     else
-                        throw std::runtime_error("[-]Failed to connect to server\n");
+                        connectPromise.set_exception(std::make_exception_ptr(std::runtime_error("[-]Failed to connect to server\n")));
                 });
             }
 
@@ -62,6 +66,7 @@ namespace tps
                 {
                     if (me->is_connected())
                     {
+                        // no point in notifying the server about the connection it itself closed
                         if (me->m_nOwnerType == owner::server)
                             me->bNotifyServer = false;
                         me->m_socket.cancel();
@@ -158,7 +163,7 @@ namespace tps
             void write_header()
             {
                 asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr, sizeof(message_header<T>)),
-                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
+                    m_writeStrand.wrap([me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
@@ -176,7 +181,7 @@ namespace tps
                             std::cout << "[" << me->m_id << "] Write Header Fail: " << ec.message() << "\n";
                             me->notify_server();
                         }
-                    });
+                    }));
             }
 
             // ASYNC
@@ -184,7 +189,7 @@ namespace tps
             {
                 asio::async_write(m_socket, asio::buffer(m_qMessageOut.front().body.data(),
                                                          m_qMessageOut.front().body.size()),
-                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
+                    m_writeStrand.wrap([me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
@@ -197,7 +202,7 @@ namespace tps
                             std::cout << "[" << me->m_id << "] Write Body Fail\n";
                             me->notify_server();
                         }
-                    });
+                    }));
             }
 
             void add_to_incoming_message_queue()
@@ -234,7 +239,7 @@ namespace tps
                             }
                         }
                         else
-                            std::cout << "[" << me->m_id << "] Read First Header Fail: " << ec.message() << "\n";
+                            std::cout << "[" << me->m_id << ":" << me.use_count() << "] Read First Header Fail: " << ec.message() << "\n";
                     });
             }
 
@@ -260,13 +265,14 @@ namespace tps
             asio::ip::tcp::socket m_socket;
 
             asio::io_context& m_asioContext;
+            asio::io_service::strand m_writeStrand;
 
             tsqueue<message<T>> m_qMessageOut;
 
             message<T> m_msgTempIn;
             tsqueue<owned_message<T>>& m_qMessageIn;
 
-            bool bNotifyServer = true;
+            std::atomic<bool> bNotifyServer = true;
             server_interface<T>* m_server;
             owner m_nOwnerType = owner::server;
 

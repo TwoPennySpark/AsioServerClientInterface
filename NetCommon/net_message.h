@@ -20,7 +20,6 @@ namespace tps
         struct message
         {
             message_header<T> hdr{};
-
             std::vector<uint8_t> body;
 
             size_t size() const

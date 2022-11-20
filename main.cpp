@@ -2,11 +2,9 @@
 #include "net_server.h"
 #include "net_client.h"
 
-const uint16_t PORT = 50010;
-const std::string IP = "192.168.1.64";
-
 enum class CustomMsgTypes: uint32_t
 {
+    ClientConnect,
     ServerAccept,
     ServerPing,
     ServerMessage,
@@ -17,19 +15,29 @@ enum class CustomMsgTypes: uint32_t
 class CustomServer: public tps::net::server_interface<CustomMsgTypes>
 {
 public:
-    CustomServer(uint16_t nPort): tps::net::server_interface<CustomMsgTypes>(nPort) {}
+    CustomServer(uint16_t nPort, uint32_t nThreads): tps::net::server_interface<CustomMsgTypes>(nPort, nThreads) {}
 
 protected:
     // this method runs in network thread
     virtual bool on_client_connect(std::shared_ptr<tps::net::connection<CustomMsgTypes>> client) override
     {
-        tps::net::message<CustomMsgTypes> msg;
-        msg.hdr.id = CustomMsgTypes::ServerAccept;
-
-        client->send(msg);
-        m_qMessagesIn.push_back(tps::net::owned_message<CustomMsgTypes>({client, msg}));
-
         return true;
+    }
+
+    // this method runs in network thread
+    virtual bool on_first_message(std::shared_ptr<tps::net::connection<CustomMsgTypes>> client,
+                                  tps::net::message<CustomMsgTypes>& msg) override
+    {
+        if (msg.hdr.id == CustomMsgTypes::ClientConnect)
+        {
+            tps::net::message<CustomMsgTypes> reply;
+            reply.hdr.id = CustomMsgTypes::ServerAccept;
+            client->send(reply);
+
+            return true;
+        }
+
+        return false;
     }
 
     // this method runs in network thread
@@ -47,7 +55,7 @@ protected:
     {
         switch (msg.hdr.id)
         {
-            case CustomMsgTypes::ServerAccept:
+            case CustomMsgTypes::ClientConnect:
                 std::cout << "Adding client\n";
                 clients.emplace_back(std::move(client));
                 break;
@@ -86,6 +94,14 @@ private:
 class CustomClient: public tps::net::client_interface<CustomMsgTypes>
 {
 public:
+    void handshake()
+    {
+        tps::net::message<CustomMsgTypes> msg;
+        msg.hdr.id = CustomMsgTypes::ClientConnect;
+
+        send(msg);
+    }
+
     void ping_server()
     {
         tps::net::message<CustomMsgTypes> msg;
@@ -108,20 +124,35 @@ public:
 
 //#define CLIENT
 
-int main()
+int main(int argc, char** argv)
 {
 #ifdef CLIENT
+    if (argc < 3)
+    {
+        std::cout << "Usage: ./client <server IP> <server port>\n";
+        return 1;
+    }
+
     CustomClient client;
-    client.connect(IP, PORT);
 
-    std::cout << "Enter 1 to send ping msg to the server\n"
-                 "Enter 2 to send broadcast msg to all clients connected to the server\n"
-                 "Enter 3 to exit\n";
+    // launch connect asynchronously, wait for result
+    auto futConnect = client.connect(argv[1], uint16_t(std::stoul(argv[2])));
+    try { futConnect.get(); } catch(const std::exception& e) {
+        std::cout << e.what() << "\n";
+        return 1;
+    }
 
-    // get input from user in separate thread
+    // if connection established - send msg with id = CustomMsgTypes::ClientConnect
+    // any other id will cause server to close the connection (CustomServer::on_first_message)
+    client.handshake();
+
+    // start thread that gets input from user
     tps::net::tsqueue<int>input;
     std::thread([&input]()
     {
+        std::cout << "Enter 1 to send ping msg to the server\n"
+                     "Enter 2 to send broadcast msg to all clients connected to the server\n"
+                     "Enter 3 to exit\n";
         while (1)
         {
             std::string in;
@@ -181,7 +212,13 @@ int main()
     }
 
 #else
-    CustomServer server(PORT);
+    if (argc < 3)
+    {
+        std::cout << "Usage: ./server <server port> <number of worker threads>\n";
+        return 1;
+    }
+
+    CustomServer server(uint16_t(std::stoul(argv[1])), uint16_t(std::stoul(argv[2])));
     server.start();
     server.update();
 #endif

@@ -11,8 +11,8 @@ namespace tps
         class server_interface
         {
         public:
-            server_interface(uint16_t port) :
-                m_asioAcceptor(m_asioContext, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port))
+            server_interface(uint16_t port, uint32_t nThreads = 1) :
+                m_asioAcceptor(m_asioContext, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)), m_nThreads(nThreads), m_contextThreadPool(nThreads)
             {
 
             }
@@ -27,8 +27,8 @@ namespace tps
                 try
                 {
                     wait_for_client_connection();
-
-                    m_threadContext = std::thread([this](){m_asioContext.run();});
+                    for (uint32_t i = 0; i < m_nThreads; i++)
+                        asio::post(m_contextThreadPool, [this](){ m_asioContext.run();});
                 } catch (std::exception& e)
                 {
                     std::cout << "[SERVER]ERROR:" << e.what() << std::endl;
@@ -42,10 +42,7 @@ namespace tps
             void stop()
             {
                 m_asioContext.stop();
-
-                if (m_threadContext.joinable())
-                    m_threadContext.join();
-
+                m_contextThreadPool.join();
                 std::cout << "[SERVER]Stopped\n";
             }
 
@@ -122,9 +119,11 @@ namespace tps
             tsqueue<owned_message<T>> m_qMessagesIn;
 
             asio::io_context m_asioContext;
-            std::thread m_threadContext;
 
             asio::ip::tcp::acceptor m_asioAcceptor;
+
+            uint32_t m_nThreads = 1;
+            asio::thread_pool m_contextThreadPool;
 
             uint32_t m_nIDCounter = 10000;
         };
